@@ -86,16 +86,20 @@ const PdfEditor = ({ file, onBack }) => {
     }, [annotations, pageNumber, currentPath, isDrawing, tool]);
 
 
+    // --- 1. STATE & CAPTURE LOGIC (Phần 1: Bắt sự kiện vẽ) ---
+    // isDrawing: Cờ báo hiệu đang giữ chuột để vẽ
+    // currentPath: Mảng chứa các toạ độ {x, y} của nét vẽ hiện tại
     const startDrawing = (e) => {
         if (tool !== 'pen' && tool !== 'highlight') return;
         const { offsetX, offsetY } = e.nativeEvent;
         setIsDrawing(true);
-        setCurrentPath([{ x: offsetX, y: offsetY }]);
+        setCurrentPath([{ x: offsetX, y: offsetY }]); // Bắt đầu điểm đầu tiên
     };
 
     const draw = (e) => {
         if (!isDrawing) return;
         const { offsetX, offsetY } = e.nativeEvent;
+        // Liên tục thêm điểm vào mảng khi di chuột
         setCurrentPath(prev => [...prev, { x: offsetX, y: offsetY }]);
     };
 
@@ -103,7 +107,7 @@ const PdfEditor = ({ file, onBack }) => {
         if (!isDrawing) return;
         setIsDrawing(false);
 
-        // Save path
+        // Lưu nét vẽ hoàn chỉnh vào bộ nhớ (annotations state)
         const color = tool === 'highlight' ? 'rgba(255, 255, 0, 0.5)' : 'red';
         const width = tool === 'highlight' ? 20 : 2;
 
@@ -141,7 +145,7 @@ const PdfEditor = ({ file, onBack }) => {
         setTool('view'); // Return to view mode after typing
     };
 
-    // --- PDF Saving Logic ---
+    // --- 2. SAVE LOGIC (Phần 2: Lưu vào PDF) ---
     const handleSave = async () => {
         const logs = [];
         const addLog = (msg) => {
@@ -159,7 +163,7 @@ const PdfEditor = ({ file, onBack }) => {
         }
 
         try {
-            // 1. Fetch existing PDF
+            // A. Tải file gốc
             addLog(`Fetching original file from: ${file.url}`);
             const existingPdfBytes = await fetch(file.url, { cache: 'no-store' }).then(res => {
                 if (!res.ok && res.status !== 304) throw new Error(`Fetch error: ${res.status}`);
@@ -167,40 +171,44 @@ const PdfEditor = ({ file, onBack }) => {
             });
             addLog("File fetched successfully.");
 
-            // 2. Load into pdf-lib
+            // B. Load PDF bằng pdf-lib
             addLog("Loading PDF into pdf-lib...");
             const pdfDoc = await PDFDocument.load(existingPdfBytes);
             const pages = pdfDoc.getPages();
             addLog(`PDF loaded. Total pages: ${pages.length}`);
 
-            // 3. Apply annotations
+            // C. Vẽ lại các nét lên PDF (Replay Annotations)
             addLog("Applying annotations...");
             Object.keys(annotations).forEach(pageNumStr => {
                 const pageIndex = parseInt(pageNumStr) - 1; // 0-indexed
                 if (pageIndex >= 0 && pageIndex < pages.length) {
                     const page = pages[pageIndex];
-                    const { height } = page.getSize();
+                    const { height } = page.getSize(); // Lấy chiều cao trang PDF
                     const pageAnns = annotations[pageNumStr];
                     addLog(`Processing page ${pageNumStr}: ${pageAnns.length} annotations.`);
 
                     pageAnns.forEach((ann, idx) => {
                         try {
                             if (ann.type === 'path') {
-                                // Normalize color
-                                let color = rgb(1, 0, 0); // Red
-                                if (ann.color.includes('255, 255, 0')) color = rgb(1, 1, 0); // Yellow
+                                // C.1: Chuyển đổi màu sắc
+                                // pdf-lib dùng hệ màu rgb(0-1), còn web dùng rgba/hex
+                                let color = rgb(1, 0, 0); // Mặc định Đỏ
+                                if (ann.color.includes('255, 255, 0')) color = rgb(1, 1, 0); // Vàng
 
-                                // Converting string points to PDF coordinates (Flip Y)
+                                // C.2: CHUYỂN ĐỔI TOẠ ĐỘ (QUAN TRỌNG)
+                                // Canvas Web: Gốc (0,0) là Góc trên-trái. Y tăng dần xuống dưới.
+                                // PDF Lib: Gốc (0,0) là Góc dưới-trái. Y tăng dần lên trên.
+                                // => Công thức: PDF_Y = Chiều_cao_trang - Canvas_Y
                                 const pathData = ann.points.map(p => {
                                     return { x: p.x, y: height - p.y };
                                 });
 
                                 if (pathData.length > 1) {
-                                    // Detect opacity
+                                    // C.3: Xử lý độ trong suốt (Highlight vs Pen)
                                     const isHighlight = ann.color.includes('255, 255, 0') || ann.color.includes('0, 0.5');
                                     const opacityVal = isHighlight ? 0.3 : 1;
 
-                                    // Draw lines
+                                    // C.4: Thực hiện vẽ (Dùng drawLine nối các điểm)
                                     for (let i = 0; i < pathData.length - 1; i++) {
                                         const p1 = pathData[i];
                                         const p2 = pathData[i + 1];
@@ -230,7 +238,7 @@ const PdfEditor = ({ file, onBack }) => {
                 }
             });
 
-            // 4. Save
+            // D. Xuất file PDF mới
             addLog("Saving modified PDF...");
             const pdfBytes = await pdfDoc.save();
             const blob = new Blob([pdfBytes], { type: 'application/pdf' });
