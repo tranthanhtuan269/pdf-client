@@ -318,12 +318,21 @@ const PdfEditor = ({ file, onBack }) => {
                             if (ann.type === 'path') {
                                 // ... Existing Path Logic ...
                                 let color = rgb(1, 0, 0);
-                                if (ann.color.includes('255, 255, 0')) color = rgb(1, 1, 0);
+                                if (ann.color.includes('255, 255, 0')) {
+                                    color = rgb(1, 1, 0);
+                                    addLog("DEBUG: Detected Highlight Path.");
+                                } else {
+                                    addLog("DEBUG: Detected Pen Path.");
+                                }
+
                                 const pathData = ann.points.map(p => ({ x: p.x * scaleX, y: pdfPageHeight - (p.y * scaleY) }));
                                 if (pathData.length > 1) {
                                     const isHighlight = ann.color.includes('255, 255, 0') || ann.color.includes('0, 0.5');
-                                    const opacityVal = isHighlight ? 0.3 : 1;
+                                    const opacityVal = isHighlight ? 0.5 : 1; // Increased opacity from 0.3 to 0.5
                                     const scaledWidth = ann.width * scaleX;
+
+                                    addLog(`Drawing path: highlight=${isHighlight}, opacity=${opacityVal}, width=${scaledWidth}`);
+
                                     for (let i = 0; i < pathData.length - 1; i++) {
                                         page.drawLine({
                                             start: pathData[i], end: pathData[i + 1],
