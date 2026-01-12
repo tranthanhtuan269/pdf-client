@@ -143,86 +143,119 @@ const PdfEditor = ({ file, onBack }) => {
 
     // --- PDF Saving Logic ---
     const handleSave = async () => {
+        const logs = [];
+        const addLog = (msg) => {
+            const entry = `${new Date().toISOString()}: ${msg}`;
+            console.log(entry);
+            logs.push(entry);
+        };
+
+        addLog("Starting save process...");
+
         if (file.type !== 'pdf') {
             alert("Saving is only supported for PDF files.");
+            addLog("Error: File type is not PDF.");
             return;
         }
 
         try {
             // 1. Fetch existing PDF
+            addLog(`Fetching original file from: ${file.url}`);
             const existingPdfBytes = await fetch(file.url, { cache: 'no-store' }).then(res => {
                 if (!res.ok && res.status !== 304) throw new Error(`Fetch error: ${res.status}`);
                 return res.arrayBuffer();
             });
+            addLog("File fetched successfully.");
 
             // 2. Load into pdf-lib
+            addLog("Loading PDF into pdf-lib...");
             const pdfDoc = await PDFDocument.load(existingPdfBytes);
             const pages = pdfDoc.getPages();
+            addLog(`PDF loaded. Total pages: ${pages.length}`);
 
             // 3. Apply annotations
+            addLog("Applying annotations...");
             Object.keys(annotations).forEach(pageNumStr => {
                 const pageIndex = parseInt(pageNumStr) - 1; // 0-indexed
                 if (pageIndex >= 0 && pageIndex < pages.length) {
                     const page = pages[pageIndex];
                     const { height } = page.getSize();
                     const pageAnns = annotations[pageNumStr];
+                    addLog(`Processing page ${pageNumStr}: ${pageAnns.length} annotations.`);
 
-                    pageAnns.forEach(ann => {
-                        if (ann.type === 'path') {
-                            // Normalize color
-                            let color = rgb(1, 0, 0); // Red
-                            if (ann.color.includes('255, 255, 0')) color = rgb(1, 1, 0); // Yellow
+                    pageAnns.forEach((ann, idx) => {
+                        try {
+                            if (ann.type === 'path') {
+                                // Normalize color
+                                let color = rgb(1, 0, 0); // Red
+                                if (ann.color.includes('255, 255, 0')) color = rgb(1, 1, 0); // Yellow
 
-                            // Converting string points to PDF coordinates (Flip Y)
-                            const pathData = ann.points.map(p => {
-                                return { x: p.x, y: height - p.y };
-                            });
+                                // Converting string points to PDF coordinates (Flip Y)
+                                const pathData = ann.points.map(p => {
+                                    return { x: p.x, y: height - p.y };
+                                });
 
-                            if (pathData.length > 1) {
-                                // Detect opacity
-                                const isHighlight = ann.color.includes('255, 255, 0') || ann.color.includes('0, 0.5');
-                                const opacityVal = isHighlight ? 0.3 : 1;
+                                if (pathData.length > 1) {
+                                    // Detect opacity
+                                    const isHighlight = ann.color.includes('255, 255, 0') || ann.color.includes('0, 0.5');
+                                    const opacityVal = isHighlight ? 0.3 : 1;
 
-                                // Draw lines
-                                for (let i = 0; i < pathData.length - 1; i++) {
-                                    const p1 = pathData[i];
-                                    const p2 = pathData[i + 1];
+                                    // Draw lines
+                                    for (let i = 0; i < pathData.length - 1; i++) {
+                                        const p1 = pathData[i];
+                                        const p2 = pathData[i + 1];
 
-                                    page.drawLine({
-                                        start: { x: p1.x, y: p1.y },
-                                        end: { x: p2.x, y: p2.y },
-                                        thickness: ann.width,
-                                        color: color,
-                                        opacity: opacityVal,
-                                        lineCap: 'round',
-                                    });
+                                        page.drawLine({
+                                            start: { x: p1.x, y: p1.y },
+                                            end: { x: p2.x, y: p2.y },
+                                            thickness: ann.width,
+                                            color: color,
+                                            opacity: opacityVal,
+                                            lineCap: 'round',
+                                        });
+                                    }
                                 }
+                            } else if (ann.type === 'text') {
+                                page.drawText(ann.text, {
+                                    x: ann.x,
+                                    y: height - ann.y, // Flip Y
+                                    size: ann.size,
+                                    color: rgb(0, 0, 0),
+                                });
                             }
-                        } else if (ann.type === 'text') {
-                            page.drawText(ann.text, {
-                                x: ann.x,
-                                y: height - ann.y, // Flip Y
-                                size: ann.size,
-                                color: rgb(0, 0, 0),
-                            });
+                        } catch (innerErr) {
+                            addLog(`Error processing annotation ${idx} on page ${pageNumStr}: ${innerErr.message}`);
                         }
                     });
                 }
             });
 
             // 4. Save
+            addLog("Saving modified PDF...");
             const pdfBytes = await pdfDoc.save();
             const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+            addLog("PDF saved to blob. Initiating download.");
 
             // 5. Download
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
             link.download = `edited_${file.filename}`;
             link.click();
+            addLog("Download triggered.");
 
         } catch (err) {
             console.error("Save error:", err);
-            alert("Failed to save PDF. See console.");
+            addLog(`CRITICAL ERROR: ${err.message}`);
+            addLog(`Stack: ${err.stack}`);
+
+            // Auto-download log file on error
+            const logBlob = new Blob([logs.join('\n')], { type: 'text/plain' });
+            const logLink = document.createElement('a');
+            logLink.href = URL.createObjectURL(logBlob);
+            logLink.download = "save_error_log.txt";
+            logLink.click();
+
+            alert("Failed to save PDF. Error log downloaded.");
         }
     };
 
