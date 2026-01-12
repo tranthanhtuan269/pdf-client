@@ -157,7 +157,6 @@ const PdfEditor = ({ file, onBack }) => {
             const pages = pdfDoc.getPages();
 
             // 3. Apply annotations
-            // Iterate over our stored annotations
             Object.keys(annotations).forEach(pageNumStr => {
                 const pageIndex = parseInt(pageNumStr) - 1; // 0-indexed
                 if (pageIndex >= 0 && pageIndex < pages.length) {
@@ -169,24 +168,19 @@ const PdfEditor = ({ file, onBack }) => {
                         if (ann.type === 'path') {
                             // Normalize color
                             let color = rgb(1, 0, 0); // Red
-                            if (ann.color.includes('255, 255, 0')) color = rgb(1, 1, 0); // Yellow (approx)
+                            if (ann.color.includes('255, 255, 0')) color = rgb(1, 1, 0); // Yellow
 
-                            // Converting string points to PDF coordinates
-                            // Canvas (0,0) is Top-Left. PDF (0,0) is usually Bottom-Left.
-                            // We need to flip Y.
+                            // Converting string points to PDF coordinates (Flip Y)
                             const pathData = ann.points.map(p => {
-                                // Assuming canvas matches page size 1:1 at scale 1. 
-                                // If scaled, we might need adjustment, but we set canvas size to page size.
                                 return { x: p.x, y: height - p.y };
                             });
 
-                            // Draw line segments
                             if (pathData.length > 1) {
                                 // Detect opacity
                                 const isHighlight = ann.color.includes('255, 255, 0') || ann.color.includes('0, 0.5');
                                 const opacityVal = isHighlight ? 0.3 : 1;
 
-                                // Use drawLine for maximum reliability
+                                // Draw lines
                                 for (let i = 0; i < pathData.length - 1; i++) {
                                     const p1 = pathData[i];
                                     const p2 = pathData[i + 1];
@@ -197,131 +191,130 @@ const PdfEditor = ({ file, onBack }) => {
                                         thickness: ann.width,
                                         color: color,
                                         opacity: opacityVal,
-                                        lineCap: 'round', // Makes vector lines smoother
+                                        lineCap: 'round',
                                     });
                                 }
                             }
+                        } else if (ann.type === 'text') {
+                            page.drawText(ann.text, {
+                                x: ann.x,
+                                y: height - ann.y, // Flip Y
+                                size: ann.size,
+                                color: rgb(0, 0, 0),
+                            });
                         }
-                    } else if (ann.type === 'text') {
-                        page.drawText(ann.text, {
-                            x: ann.x,
-                            y: height - ann.y, // Flip Y
-                            size: ann.size,
-                            color: rgb(0, 0, 0)
-                        });
-                    }
-                });
-        }
+                    });
+                }
             });
 
-    // 4. Save
-    const pdfBytes = await pdfDoc.save();
-    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+            // 4. Save
+            const pdfBytes = await pdfDoc.save();
+            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
 
-    // 5. Download
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `edited_${file.filename}`;
-    link.click();
+            // 5. Download
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `edited_${file.filename}`;
+            link.click();
 
-} catch (err) {
-    console.error("Save error:", err);
-    alert("Failed to save PDF. See console.");
-}
+        } catch (err) {
+            console.error("Save error:", err);
+            alert("Failed to save PDF. See console.");
+        }
     };
 
-const onPageLoadSuccess = (page) => {
-    const canvas = canvasRef.current;
-    if (canvas) {
-        canvas.width = page.width;
-        canvas.height = page.height;
-    }
-};
+    const onPageLoadSuccess = (page) => {
+        const canvas = canvasRef.current;
+        if (canvas) {
+            canvas.width = page.width;
+            canvas.height = page.height;
+        }
+    };
 
-return (
-    <div className="flex flex-col h-screen bg-gray-900 text-white">
-        {/* Toolbar */}
-        <div className="flex items-center justify-between p-4 bg-gray-800 shadow-md z-20">
-            <div className="flex items-center space-x-4">
-                <button onClick={onBack} className="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600">Back</button>
-                <h2 className="font-bold truncate max-w-xs">{file.originalname}</h2>
-            </div>
-
-            {file.type === 'pdf' && (
-                <div className="flex space-x-2 bg-gray-700 p-1 rounded-lg">
-                    <ToolButton active={tool === 'view'} onClick={() => setTool('view')} icon="👁 View" />
-                    <ToolButton active={tool === 'pen'} onClick={() => setTool('pen')} icon="✎ Pen" />
-                    <ToolButton active={tool === 'highlight'} onClick={() => setTool('highlight')} icon="🖊 Highlight" />
-                    <ToolButton active={tool === 'text'} onClick={() => setTool('text')} icon="T Text" />
+    return (
+        <div className="flex flex-col h-screen bg-gray-900 text-white">
+            {/* Toolbar */}
+            <div className="flex items-center justify-between p-4 bg-gray-800 shadow-md z-20">
+                <div className="flex items-center space-x-4">
+                    <button onClick={onBack} className="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600">Back</button>
+                    <h2 className="font-bold truncate max-w-xs">{file.originalname}</h2>
                 </div>
-            )}
 
-            <div className="flex items-center space-x-4">
-                <button disabled={pageNumber <= 1} onClick={() => setPageNumber(p => p - 1)} className="px-3 py-1 bg-gray-700 rounded disabled:opacity-50">Prev</button>
-                <span>{pageNumber} / {numPages || '--'}</span>
-                <button disabled={pageNumber >= numPages} onClick={() => setPageNumber(p => p + 1)} className="px-3 py-1 bg-gray-700 rounded disabled:opacity-50">Next</button>
-                <button onClick={handleSave} className="ml-4 px-4 py-2 bg-green-600 hover:bg-green-500 rounded font-bold shadow-lg transition-transform active:scale-95">
-                    💾 SAVE
-                </button>
+                {file.type === 'pdf' && (
+                    <div className="flex space-x-2 bg-gray-700 p-1 rounded-lg">
+                        <ToolButton active={tool === 'view'} onClick={() => setTool('view')} icon="👁 View" />
+                        <ToolButton active={tool === 'pen'} onClick={() => setTool('pen')} icon="✎ Pen" />
+                        <ToolButton active={tool === 'highlight'} onClick={() => setTool('highlight')} icon="🖊 Highlight" />
+                        <ToolButton active={tool === 'text'} onClick={() => setTool('text')} icon="T Text" />
+                    </div>
+                )}
+
+                <div className="flex items-center space-x-4">
+                    <button disabled={pageNumber <= 1} onClick={() => setPageNumber(p => p - 1)} className="px-3 py-1 bg-gray-700 rounded disabled:opacity-50">Prev</button>
+                    <span>{pageNumber} / {numPages || '--'}</span>
+                    <button disabled={pageNumber >= numPages} onClick={() => setPageNumber(p => p + 1)} className="px-3 py-1 bg-gray-700 rounded disabled:opacity-50">Next</button>
+                    <button onClick={handleSave} className="ml-4 px-4 py-2 bg-green-600 hover:bg-green-500 rounded font-bold shadow-lg transition-transform active:scale-95">
+                        💾 SAVE
+                    </button>
+                </div>
             </div>
-        </div>
 
-        {/* Main View Area */}
-        <div className="flex-1 overflow-auto flex justify-center p-8 bg-gray-900 relative">
-            {file.type === 'pdf' ? (
-                <div className="relative border shadow-2xl">
-                    <Document
-                        file={file.url}
-                        onLoadSuccess={onDocumentLoadSuccess}
-                        loading={<div className="text-white">Loading PDF...</div>}
-                    >
-                        <Page
-                            pageNumber={pageNumber}
-                            scale={scale}
-                            onLoadSuccess={onPageLoadSuccess}
-                            renderAnnotationLayer={false}
-                            renderTextLayer={false}
-                        />
-                    </Document>
-
-                    {/* Drawing & Interaction Overlay */}
-                    <canvas
-                        ref={canvasRef}
-                        onMouseDown={startDrawing}
-                        onMouseMove={draw}
-                        onMouseUp={stopDrawing}
-                        onMouseLeave={stopDrawing}
-                        onClick={handleCanvasClick}
-                        className={`absolute inset-0 z-10 ${tool === 'view' ? '' : 'cursor-crosshair'}`}
-                    />
-
-                    {/* Text Input Overlay */}
-                    {textInput && (
-                        <div
-                            className="absolute z-20 bg-white p-1 rounded shadow-lg border border-blue-500"
-                            style={{ left: textInput.x, top: textInput.y }}
+            {/* Main View Area */}
+            <div className="flex-1 overflow-auto flex justify-center p-8 bg-gray-900 relative">
+                {file.type === 'pdf' ? (
+                    <div className="relative border shadow-2xl">
+                        <Document
+                            file={file.url}
+                            onLoadSuccess={onDocumentLoadSuccess}
+                            loading={<div className="text-white">Loading PDF...</div>}
                         >
-                            <input
-                                autoFocus
-                                className="text-black outline-none bg-transparent min-w-[100px]"
-                                value={textInput.value}
-                                onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
-                                onKeyDown={(e) => e.key === 'Enter' && confirmText()}
-                                onBlur={confirmText}
-                                placeholder="Type here..."
+                            <Page
+                                pageNumber={pageNumber}
+                                scale={scale}
+                                onLoadSuccess={onPageLoadSuccess}
+                                renderAnnotationLayer={false}
+                                renderTextLayer={false}
                             />
-                        </div>
-                    )}
-                </div>
-            ) : (
-                <div className="bg-white p-4 rounded shadow-lg">
-                    <p className="text-black mb-4">Preview for non-PDF files: <a href={file.url} target="_blank" className="text-blue-600 underline">Open File</a></p>
-                    <img src={file.url} alt="Uploaded" className="max-w-full max-h-[80vh]" />
-                </div>
-            )}
+                        </Document>
+
+                        {/* Drawing & Interaction Overlay */}
+                        <canvas
+                            ref={canvasRef}
+                            onMouseDown={startDrawing}
+                            onMouseMove={draw}
+                            onMouseUp={stopDrawing}
+                            onMouseLeave={stopDrawing}
+                            onClick={handleCanvasClick}
+                            className={`absolute inset-0 z-10 ${tool === 'view' ? '' : 'cursor-crosshair'}`}
+                        />
+
+                        {/* Text Input Overlay */}
+                        {textInput && (
+                            <div
+                                className="absolute z-20 bg-white p-1 rounded shadow-lg border border-blue-500"
+                                style={{ left: textInput.x, top: textInput.y }}
+                            >
+                                <input
+                                    autoFocus
+                                    className="text-black outline-none bg-transparent min-w-[100px]"
+                                    value={textInput.value}
+                                    onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
+                                    onKeyDown={(e) => e.key === 'Enter' && confirmText()}
+                                    onBlur={confirmText}
+                                    placeholder="Type here..."
+                                />
+                            </div>
+                        )}
+                    </div>
+                ) : (
+                    <div className="bg-white p-4 rounded shadow-lg">
+                        <p className="text-black mb-4">Preview for non-PDF files: <a href={file.url} target="_blank" className="text-blue-600 underline">Open File</a></p>
+                        <img src={file.url} alt="Uploaded" className="max-w-full max-h-[80vh]" />
+                    </div>
+                )}
+            </div>
         </div>
-    </div>
-);
+    );
 };
 
 const ToolButton = ({ active, onClick, icon }) => (
