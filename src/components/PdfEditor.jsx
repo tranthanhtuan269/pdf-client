@@ -304,6 +304,11 @@ const PdfEditor = ({ file, onBack }) => {
             addLog("Loading PDF into pdf-lib...");
             const pdfDoc = await PDFDocument.load(existingPdfBytes);
 
+            // DEBUG: Check available methods
+            const proto = Object.getPrototypeOf(pdfDoc);
+            addLog(`DEBUG: PDFDocument methods: ${Object.getOwnPropertyNames(proto).join(', ')}`);
+            addLog(`DEBUG: Has encrypt? ${typeof pdfDoc.encrypt}`);
+
             // --- Encryption Step ---
             if (pdfPassword) {
                 if (typeof pdfDoc.encrypt === 'function') {
@@ -323,7 +328,7 @@ const PdfEditor = ({ file, onBack }) => {
                     });
                 } else {
                     addLog("WARNING: pdfDoc.encrypt is not a function. Skipping encryption.");
-                    alert("Encryption not supported by this PDF library version.");
+                    alert(`Encryption failed: 'encrypt' method missing. \nMethods found: ${Object.getOwnPropertyNames(proto).filter(m => m.startsWith('e')).join(', ')}`);
                 }
             }
 
