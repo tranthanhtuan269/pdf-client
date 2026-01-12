@@ -139,8 +139,8 @@ const PdfEditor = ({ file, onBack }) => {
 
     const handleCanvasClick = (e) => {
         if (tool === 'text') {
-            const { offsetX, offsetY } = e.nativeEvent;
-            setTextInput({ x: offsetX, y: offsetY, value: '', page: pageNumber });
+            const { x, y } = getCanvasCoordinates(e.nativeEvent);
+            setTextInput({ x, y, value: '', page: pageNumber });
         }
     };
 
