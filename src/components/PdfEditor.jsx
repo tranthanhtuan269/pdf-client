@@ -150,7 +150,10 @@ const PdfEditor = ({ file, onBack }) => {
 
         try {
             // 1. Fetch existing PDF
-            const existingPdfBytes = await fetch(file.url).then(res => res.arrayBuffer());
+            const existingPdfBytes = await fetch(file.url, { cache: 'no-store' }).then(res => {
+                if (!res.ok && res.status !== 304) throw new Error(`Fetch error: ${res.status}`);
+                return res.arrayBuffer();
+            });
 
             // 2. Load into pdf-lib
             const pdfDoc = await PDFDocument.load(existingPdfBytes);
