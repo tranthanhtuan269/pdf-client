@@ -179,6 +179,26 @@ const PdfEditor = ({ file, onBack }) => {
 
             // C. Vẽ lại các nét lên PDF (Replay Annotations)
             addLog("Applying annotations...");
+
+            // DEBUG: Hardcode a test blue line on page 1
+            if (pages.length > 0) {
+                const p1 = pages[0];
+                const { width: dw, height: dh } = p1.getSize();
+                addLog(`DEBUG: Page 1 Dimensions: ${dw} x ${dh}`);
+                try {
+                    p1.drawLine({
+                        start: { x: 0, y: 0 },
+                        end: { x: dw, y: dh },
+                        thickness: 5,
+                        color: rgb(0, 0, 1), // Blue
+                        opacity: 1,
+                    });
+                    addLog("DEBUG: Drew diagonal test line on Page 1 (Blue).");
+                } catch (e) {
+                    addLog("DEBUG: Failed to draw test line: " + e.message);
+                }
+            }
+
             Object.keys(annotations).forEach(pageNumStr => {
                 const pageIndex = parseInt(pageNumStr) - 1; // 0-indexed
                 if (pageIndex >= 0 && pageIndex < pages.length) {
