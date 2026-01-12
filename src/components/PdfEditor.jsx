@@ -209,6 +209,9 @@ const PdfEditor = ({ file, onBack }) => {
                                     const opacityVal = isHighlight ? 0.3 : 1;
 
                                     // C.4: Thực hiện vẽ (Dùng drawLine nối các điểm)
+                                    // DEBUG: Log để kiểm tra vòng lặp vẽ có chạy không
+                                    if (idx === 0) addLog(`--> Start drawing path ${idx} with ${pathData.length} points.`);
+
                                     for (let i = 0; i < pathData.length - 1; i++) {
                                         const p1 = pathData[i];
                                         const p2 = pathData[i + 1];
