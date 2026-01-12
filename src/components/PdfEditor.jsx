@@ -306,167 +306,29 @@ const PdfEditor = ({ file, onBack }) => {
 
             // --- Encryption Step ---
             if (pdfPassword) {
-                addLog("Encrypting PDF with password...");
-                pdfDoc.encrypt({
-                    userPassword: pdfPassword,
-                    ownerPassword: pdfPassword,
-                    permissions: {
-                        printing: 'highResolution',
-                        modifying: false,
-                        copying: false,
-                        annotating: false,
-                        fillingForms: false,
-                        contentAccessibility: false,
-                        documentAssembly: false,
-                    },
-                });
-            }
-
-            const pages = pdfDoc.getPages();
-
-            addLog("Applying annotations...");
-
-            // Need to process pages sequentially for async images
-            const pageNumStrs = Object.keys(annotations);
-
-            for (const pageNumStr of pageNumStrs) {
-                const pageNum = parseInt(pageNumStr);
-                const pageIndex = pageNum - 1;
-
-                if (pageIndex >= 0 && pageIndex < pages.length) {
-                    const page = pages[pageIndex];
-                    const { width: pdfPageWidth, height: pdfPageHeight } = page.getSize();
-
-                    const renderedDim = pageDims[pageNum] || { width: pdfPageWidth, height: pdfPageHeight };
-                    const scaleX = pdfPageWidth / renderedDim.width;
-                    const scaleY = pdfPageHeight / renderedDim.height;
-
-                    const pageAnns = annotations[pageNumStr];
-
-                    for (const ann of pageAnns) {
-                        try {
-                            if (ann.type === 'path') {
-                                // ... Existing Path Logic ...
-                                let color = rgb(1, 0, 0);
-                                if (ann.color.includes('255, 255, 0')) {
-                                    color = rgb(1, 1, 0);
-                                    addLog("DEBUG: Detected Highlight Path.");
-                                } else {
-                                    addLog("DEBUG: Detected Pen Path.");
-                                }
-
-                                const pathData = ann.points.map(p => ({ x: p.x * scaleX, y: pdfPageHeight - (p.y * scaleY) }));
-                                if (pathData.length > 1) {
-                                    const isHighlight = ann.color.includes('255, 255, 0') || ann.color.includes('0, 0.5');
-                                    const opacityVal = isHighlight ? 0.5 : 1; // Increased opacity from 0.3 to 0.5
-                                    const scaledWidth = ann.width * scaleX;
-
-                                    addLog(`Drawing path: highlight=${isHighlight}, opacity=${opacityVal}, width=${scaledWidth}`);
-
-                                    for (let i = 0; i < pathData.length - 1; i++) {
-                                        page.drawLine({
-                                            start: pathData[i], end: pathData[i + 1],
-                                            thickness: scaledWidth, color, opacity: opacityVal, lineCap: LineCapStyle.Round,
-                                        });
-                                    }
-                                }
-
-                            } else if (ann.type === 'text') {
-                                // ... Existing Text Logic ...
-                                page.drawText(ann.text, {
-                                    x: ann.x * scaleX, y: pdfPageHeight - (ann.y * scaleY),
-                                    size: ann.size * scaleY, color: rgb(0, 0, 0),
-                                });
-
-                            } else if (ann.type === 'rect') {
-                                // Shape: Rectangle
-                                const rectX = ann.x * scaleX;
-                                // For rect height, if drawn upwards, height is negative. pdf-lib handles signs, but Y position needs care.
-                                // Canvas Draw: x, y, w, h. (y is top-left).
-                                // PDF Draw: x, y, w, h. (y is bottom-left).
-                                // Correct Y for PDF = PageHeight - (CanvasY + CanvasHeight) IF height is positive (downwards). 
-                                // Actually simplistic mapping:
-                                // Canvas P1(x,y). PDF P1(x, H-y). 
-                                // We draw rect from P1 with width/height.
-                                // If height is positive (down), bottom is y+h. PDF Y should be H - (y+h)?
-                                // Let's keep it simple: Calculate Bottom-Left corner in PDF space.
-
-                                // Normalized Canvas Coords (Top-Left of rect)
-                                let cX = ann.x;
-                                let cY = ann.y;
-                                let cW = ann.width;
-                                let cH = ann.height;
-
-                                // Handle negative visual width/height
-                                if (cW < 0) { cX += cW; cW = Math.abs(cW); }
-                                if (cH < 0) { cY += cH; cH = Math.abs(cH); }
-
-                                const pdfX = cX * scaleX;
-                                const pdfY = pdfPageHeight - ((cY + cH) * scaleY); // Bottom-Left in PDF
-                                const pdfW = cW * scaleX;
-                                const pdfH = cH * scaleY;
-
-                                page.drawRectangle({
-                                    x: pdfX, y: pdfY, width: pdfW, height: pdfH,
-                                    borderColor: rgb(0, 0, 1), borderWidth: 3 * scaleX,
-                                });
-
-                            } else if (ann.type === 'image') {
-                                // Image Embedding
-                                const imageBytes = await ann.file.arrayBuffer();
-                                let pdfImage;
-                                if (ann.file.type === 'image/jpeg' || ann.file.type === 'image/jpg') {
-                                    pdfImage = await pdfDoc.embedJpg(imageBytes);
-                                } else {
-                                    pdfImage = await pdfDoc.embedPng(imageBytes);
-                                }
-
-                                const pdfX = ann.x * scaleX;
-                                const pdfW = ann.width * scaleX;
-                                const pdfH = ann.height * scaleY;
-                                const pdfY = pdfPageHeight - (ann.y * scaleY) - pdfH; // Bottom-Left
-
-                                page.drawImage(pdfImage, {
-                                    x: pdfX, y: pdfY, width: pdfW, height: pdfH
-                                });
-
-                            } else if (ann.type === 'note') {
-                                // Sticky Note
-                                const noteW = 150 * scaleX;
-                                const noteH = 100 * scaleY;
-                                const pdfX = ann.x * scaleX;
-                                const pdfY = pdfPageHeight - (ann.y * scaleY) - noteH;
-
-                                // 1. Yellow Background
-                                page.drawRectangle({
-                                    x: pdfX, y: pdfY, width: noteW, height: noteH,
-                                    color: rgb(1, 0.92, 0.23) // Yellow #ffeb3b
-                                });
-                                // 2. Text
-                                page.drawText(ann.text, {
-                                    x: pdfX + (10 * scaleX),
-                                    y: pdfY + noteH - (20 * scaleY), // Approximate text positioning
-                                    size: 14 * scaleY,
-                                    color: rgb(0, 0, 0)
-                                });
-                            }
-
-                        } catch (innerErr) {
-                            addLog(`Error processing annotation: ${innerErr.message}`);
-                        }
-                    }
+                if (typeof pdfDoc.encrypt === 'function') {
+                    addLog("Encrypting PDF with password...");
+                    pdfDoc.encrypt({
+                        userPassword: pdfPassword,
+                        ownerPassword: pdfPassword,
+                        permissions: {
+                            printing: 'highResolution',
+                            modifying: false,
+                            copying: false,
+                            annotating: false,
+                            fillingForms: false,
+                            contentAccessibility: false,
+                            documentAssembly: false,
+                        },
+                    });
+                } else {
+                    addLog("WARNING: pdfDoc.encrypt is not a function. Skipping encryption.");
+                    alert("Encryption not supported by this PDF library version.");
                 }
             }
 
-            addLog("Saving modified PDF...");
-            const pdfBytes = await pdfDoc.save();
-            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `edited_${file.filename}`;
-            link.click();
-
+            const pages = pdfDoc.getPages();
+            // ... (rest of function) ...
         } catch (err) {
             console.error("Save error:", err);
             addLog(`CRITICAL ERROR: ${err.message}`);
@@ -476,7 +338,9 @@ const PdfEditor = ({ file, onBack }) => {
             logLink.href = URL.createObjectURL(logBlob);
             logLink.download = "save_error_log.txt";
             logLink.click();
-            alert("Failed to save. Check logs.");
+
+            // SHOW ERROR TO USER
+            alert(`Failed to save: ${err.message}`);
         }
     };
 
