@@ -8,17 +8,24 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/b
 const PdfEditor = ({ file, onBack }) => {
     const [numPages, setNumPages] = useState(null);
     const [pageNumber, setPageNumber] = useState(1);
-    const [tool, setTool] = useState('view'); // view, pen, highlight, text
+    const [tool, setTool] = useState('view'); // view, pen, highlight, text, rect, image, note
     const [scale, setScale] = useState(1.0);
 
     // State for annotations: Map<pageNumber, Annotation[]>
     // Annotation: { type: 'path' | 'text', ...data }
     const [annotations, setAnnotations] = useState({});
-    const [currentPath, setCurrentPath] = useState([]); // For drawing
+
+    // Drawing State
+    const [currentPath, setCurrentPath] = useState([]); // For pen/highlight path
+    const [currentRect, setCurrentRect] = useState(null); // { x, y, width, height } for rect drawing
     const [isDrawing, setIsDrawing] = useState(false);
 
-    // Text Input State
-    const [textInput, setTextInput] = useState(null); // { x, y, value, page }
+    // Text/Note Input State
+    const [textInput, setTextInput] = useState(null); // { x, y, value, page, type: 'text'|'note' }
+
+    // Image State
+    const [pendingImage, setPendingImage] = useState(null); // { file, url, width, height }
+    const fileInputRef = useRef(null);
 
     // State for page dimensions (from react-pdf)
     const [pageDims, setPageDims] = useState({}); // { [pageNum]: { width, height } }
@@ -44,31 +51,52 @@ const PdfEditor = ({ file, onBack }) => {
         }
     };
 
-    // --- Canvas & Drawing Logic ---
+    // --- Image Handling ---
+    const handleImageUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            // Default max size 200px
+            const scaleFactor = Math.min(200 / img.width, 200 / img.height, 1);
+            setPendingImage({
+                file,
+                url,
+                width: img.width * scaleFactor,
+                height: img.height * scaleFactor,
+                imgElement: img // Keep ref to render on canvas
+            });
+        };
+        img.src = url;
+        e.target.value = null; // Reset input
+    };
+
+    const triggerImageUpload = () => {
+        fileInputRef.current?.click();
+        setTool('image');
+    };
+
+
+    // --- Canvas Rendering Logic ---
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
 
-        if (tool === 'view' || tool === 'text') {
-            canvas.style.pointerEvents = (tool === 'text') ? 'auto' : 'none'; // Allow clicking for text
-            return;
+        // Pointer events logic
+        if (['view', 'text', 'image', 'note'].includes(tool)) {
+            canvas.style.pointerEvents = 'auto'; // Need clicks for all these
         } else {
-            canvas.style.pointerEvents = 'auto'; // Drawing
+            canvas.style.pointerEvents = 'auto'; // Drawing/Shapes
         }
 
-        const context = canvas.getContext('2d');
-        context.lineCap = 'round';
-        context.lineJoin = 'round';
-        context.strokeStyle = tool === 'highlight' ? 'rgba(255, 255, 0, 0.5)' : 'red';
-        context.lineWidth = tool === 'highlight' ? 20 : 2;
-        contextRef.current = context;
-    }, [tool, pageNumber]);
-
-    // Redraw annotations when page or annotations change
-    useEffect(() => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
         const ctx = canvas.getContext('2d');
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        contextRef.current = ctx;
+
+        // --- Render Loop ---
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         const pageAnnotations = annotations[pageNumber] || [];
@@ -87,11 +115,29 @@ const PdfEditor = ({ file, onBack }) => {
                 ctx.font = '16px Arial';
                 ctx.fillStyle = 'black';
                 ctx.fillText(ann.text, ann.x, ann.y);
+            } else if (ann.type === 'rect') {
+                ctx.beginPath();
+                ctx.strokeStyle = ann.color;
+                ctx.lineWidth = 3;
+                ctx.rect(ann.x, ann.y, ann.width, ann.height);
+                ctx.stroke();
+            } else if (ann.type === 'image') {
+                if (ann.imgElement) {
+                    ctx.drawImage(ann.imgElement, ann.x, ann.y, ann.width, ann.height);
+                }
+            } else if (ann.type === 'note') {
+                // Draw Sticky Note
+                ctx.fillStyle = '#ffeb3b'; // Yellow
+                ctx.fillRect(ann.x, ann.y, 150, 100); // Fixed size for note
+                ctx.font = '14px Arial';
+                ctx.fillStyle = 'black';
+                // Simple wrapping or just draw text
+                ctx.fillText(ann.text, ann.x + 10, ann.y + 30);
             }
         });
 
-        // Draw current path if drawing
-        if (isDrawing && currentPath.length > 0) {
+        // Draw current path (Pen/Highlight)
+        if (isDrawing && currentPath.length > 0 && (tool === 'pen' || tool === 'highlight')) {
             ctx.beginPath();
             ctx.strokeStyle = tool === 'highlight' ? 'rgba(255, 255, 0, 0.5)' : 'red';
             ctx.lineWidth = tool === 'highlight' ? 20 : 2;
@@ -100,54 +146,117 @@ const PdfEditor = ({ file, onBack }) => {
             ctx.stroke();
         }
 
-    }, [annotations, pageNumber, currentPath, isDrawing, tool]);
+        // Draw current Rect
+        if (isDrawing && currentRect && tool === 'rect') {
+            ctx.beginPath();
+            ctx.strokeStyle = 'blue';
+            ctx.lineWidth = 3;
+            ctx.rect(currentRect.x, currentRect.y, currentRect.width, currentRect.height);
+            ctx.stroke();
+        }
+
+    }, [annotations, pageNumber, currentPath, currentRect, isDrawing, tool]);
 
 
-    // --- 1. STATE & CAPTURE LOGIC (Phần 1: Bắt sự kiện vẽ) ---
-    // isDrawing: Cờ báo hiệu đang giữ chuột để vẽ
-    // currentPath: Mảng chứa các toạ độ {x, y} của nét vẽ hiện tại
+    // --- Interaction Handlers ---
     const startDrawing = (e) => {
-        if (tool !== 'pen' && tool !== 'highlight') return;
-        const { offsetX, offsetY } = e.nativeEvent;
+        if (['pen', 'highlight', 'rect'].indexOf(tool) === -1) return;
+
         setIsDrawing(true);
-        setCurrentPath([{ x: offsetX, y: offsetY }]); // Bắt đầu điểm đầu tiên
+        const { offsetX, offsetY } = e.nativeEvent;
+
+        if (tool === 'rect') {
+            setCurrentRect({ x: offsetX, y: offsetY, width: 0, height: 0, startX: offsetX, startY: offsetY });
+        } else {
+            setCurrentPath([{ x: offsetX, y: offsetY }]);
+        }
     };
 
     const draw = (e) => {
         if (!isDrawing) return;
         const { offsetX, offsetY } = e.nativeEvent;
-        // Liên tục thêm điểm vào mảng khi di chuột
-        setCurrentPath(prev => [...prev, { x: offsetX, y: offsetY }]);
+
+        if (tool === 'rect') {
+            setCurrentRect(prev => ({
+                ...prev,
+                width: offsetX - prev.startX,
+                height: offsetY - prev.startY
+            }));
+        } else {
+            setCurrentPath(prev => [...prev, { x: offsetX, y: offsetY }]);
+        }
     };
 
     const stopDrawing = () => {
         if (!isDrawing) return;
         setIsDrawing(false);
 
-        // Lưu nét vẽ hoàn chỉnh vào bộ nhớ (annotations state)
-        const color = tool === 'highlight' ? 'rgba(255, 255, 0, 0.5)' : 'red';
-        const width = tool === 'highlight' ? 20 : 2;
-
-        const newAnn = { type: 'path', points: currentPath, color, width };
-
-        setAnnotations(prev => ({
-            ...prev,
-            [pageNumber]: [...(prev[pageNumber] || []), newAnn]
-        }));
-        setCurrentPath([]);
+        if (tool === 'rect') {
+            if (currentRect && (Math.abs(currentRect.width) > 5 || Math.abs(currentRect.height) > 5)) {
+                const newAnn = {
+                    type: 'rect',
+                    x: currentRect.x,
+                    y: currentRect.y,
+                    width: currentRect.width,
+                    height: currentRect.height,
+                    color: 'blue'
+                };
+                setAnnotations(prev => ({
+                    ...prev,
+                    [pageNumber]: [...(prev[pageNumber] || []), newAnn]
+                }));
+            }
+            setCurrentRect(null);
+        } else {
+            // Path logic
+            const color = tool === 'highlight' ? 'rgba(255, 255, 0, 0.5)' : 'red';
+            const width = tool === 'highlight' ? 20 : 2;
+            const newAnn = { type: 'path', points: currentPath, color, width };
+            setAnnotations(prev => ({
+                ...prev,
+                [pageNumber]: [...(prev[pageNumber] || []), newAnn]
+            }));
+            setCurrentPath([]);
+        }
     };
 
     const handleCanvasClick = (e) => {
-        if (tool === 'text') {
-            const { offsetX, offsetY } = e.nativeEvent;
-            setTextInput({ x: offsetX, y: offsetY, value: '', page: pageNumber });
+        const { offsetX, offsetY } = e.nativeEvent;
+
+        if (tool === 'text' || tool === 'note') {
+            setTextInput({
+                x: offsetX,
+                y: offsetY,
+                value: '',
+                page: pageNumber,
+                type: tool // 'text' or 'note'
+            });
+        }
+        else if (tool === 'image' && pendingImage) {
+            // Place Image
+            const newAnn = {
+                type: 'image',
+                x: offsetX,
+                y: offsetY,
+                width: pendingImage.width,
+                height: pendingImage.height,
+                file: pendingImage.file,
+                url: pendingImage.url,
+                imgElement: pendingImage.imgElement
+            };
+            setAnnotations(prev => ({
+                ...prev,
+                [pageNumber]: [...(prev[pageNumber] || []), newAnn]
+            }));
+            setPendingImage(null); // Clear pending
+            setTool('view');
         }
     };
 
     const confirmText = () => {
         if (textInput && textInput.value.trim() !== '') {
             const newAnn = {
-                type: 'text',
+                type: textInput.type, // 'text' or 'note'
                 text: textInput.value,
                 x: textInput.x,
                 y: textInput.y,
@@ -159,10 +268,10 @@ const PdfEditor = ({ file, onBack }) => {
             }));
         }
         setTextInput(null);
-        setTool('view'); // Return to view mode after typing
+        setTool('view');
     };
 
-    // --- 2. SAVE LOGIC (Phần 2: Lưu vào PDF) ---
+    // --- PDF Saving Logic ---
     const handleSave = async () => {
         const logs = [];
         const addLog = (msg) => {
@@ -170,34 +279,27 @@ const PdfEditor = ({ file, onBack }) => {
             console.log(entry);
             logs.push(entry);
         };
-
         addLog("Starting save process...");
 
         if (file.type !== 'pdf') {
             alert("Saving is only supported for PDF files.");
-            addLog("Error: File type is not PDF.");
             return;
         }
 
         try {
-            // A. Tải file gốc
             addLog(`Fetching original file from: ${file.url}`);
-            const existingPdfBytes = await fetch(file.url, { cache: 'no-store' }).then(res => {
-                if (!res.ok && res.status !== 304) throw new Error(`Fetch error: ${res.status}`);
-                return res.arrayBuffer();
-            });
-            addLog("File fetched successfully.");
+            const existingPdfBytes = await fetch(file.url, { cache: 'no-store' }).then(res => res.arrayBuffer());
 
-            // B. Load PDF bằng pdf-lib
             addLog("Loading PDF into pdf-lib...");
             const pdfDoc = await PDFDocument.load(existingPdfBytes);
             const pages = pdfDoc.getPages();
-            addLog(`PDF loaded. Total pages: ${pages.length}`);
 
-            // C. Vẽ lại các nét lên PDF (Replay Annotations)
             addLog("Applying annotations...");
 
-            Object.keys(annotations).forEach(pageNumStr => {
+            // Need to process pages sequentially for async images
+            const pageNumStrs = Object.keys(annotations);
+
+            for (const pageNumStr of pageNumStrs) {
                 const pageNum = parseInt(pageNumStr);
                 const pageIndex = pageNum - 1;
 
@@ -205,100 +307,144 @@ const PdfEditor = ({ file, onBack }) => {
                     const page = pages[pageIndex];
                     const { width: pdfPageWidth, height: pdfPageHeight } = page.getSize();
 
-                    // Get rendered dimensions for this page
                     const renderedDim = pageDims[pageNum] || { width: pdfPageWidth, height: pdfPageHeight };
                     const scaleX = pdfPageWidth / renderedDim.width;
                     const scaleY = pdfPageHeight / renderedDim.height;
 
-                    addLog(`Page ${pageNum}: PDF[${pdfPageWidth}x${pdfPageHeight}] vs Rendered[${renderedDim.width}x${renderedDim.height}]. Scale: ${scaleX.toFixed(3)}, ${scaleY.toFixed(3)}`);
-
                     const pageAnns = annotations[pageNumStr];
 
-                    pageAnns.forEach((ann, idx) => {
+                    for (const ann of pageAnns) {
                         try {
                             if (ann.type === 'path') {
-                                // Normalize color
-                                let color = rgb(1, 0, 0); // Red
-                                if (ann.color.includes('255, 255, 0')) color = rgb(1, 1, 0); // Yellow
-
-                                // Converting string points to PDF coordinates with SCALE
-                                const pathData = ann.points.map(p => {
-                                    const scaledX = p.x * scaleX;
-                                    const scaledY = p.y * scaleY;
-                                    return { x: scaledX, y: pdfPageHeight - scaledY }; // PDF Y is flipped
-                                });
-
+                                // ... Existing Path Logic ...
+                                let color = rgb(1, 0, 0);
+                                if (ann.color.includes('255, 255, 0')) color = rgb(1, 1, 0);
+                                const pathData = ann.points.map(p => ({ x: p.x * scaleX, y: pdfPageHeight - (p.y * scaleY) }));
                                 if (pathData.length > 1) {
-                                    // C.3: Xử lý độ trong suốt (Highlight vs Pen)
                                     const isHighlight = ann.color.includes('255, 255, 0') || ann.color.includes('0, 0.5');
                                     const opacityVal = isHighlight ? 0.3 : 1;
-                                    const scaledWidth = ann.width * scaleX; // Scale stroke width too
-
-                                    // C.4: Thực hiện vẽ (Dùng drawLine nối các điểm)
+                                    const scaledWidth = ann.width * scaleX;
                                     for (let i = 0; i < pathData.length - 1; i++) {
-                                        const p1 = pathData[i];
-                                        const p2 = pathData[i + 1];
-
                                         page.drawLine({
-                                            start: { x: p1.x, y: p1.y },
-                                            end: { x: p2.x, y: p2.y },
-                                            thickness: scaledWidth,
-                                            color: color,
-                                            opacity: opacityVal,
-                                            lineCap: LineCapStyle.Round,
+                                            start: pathData[i], end: pathData[i + 1],
+                                            thickness: scaledWidth, color, opacity: opacityVal, lineCap: LineCapStyle.Round,
                                         });
                                     }
                                 }
-                            } else if (ann.type === 'text') {
-                                const scaledX = ann.x * scaleX;
-                                const scaledY = ann.y * scaleY;
-                                const scaledSize = ann.size * scaleY; // Approx scale text size
 
+                            } else if (ann.type === 'text') {
+                                // ... Existing Text Logic ...
                                 page.drawText(ann.text, {
-                                    x: scaledX,
-                                    y: pdfPageHeight - scaledY, // Flip Y
-                                    size: scaledSize,
-                                    color: rgb(0, 0, 0),
+                                    x: ann.x * scaleX, y: pdfPageHeight - (ann.y * scaleY),
+                                    size: ann.size * scaleY, color: rgb(0, 0, 0),
+                                });
+
+                            } else if (ann.type === 'rect') {
+                                // Shape: Rectangle
+                                const rectX = ann.x * scaleX;
+                                // For rect height, if drawn upwards, height is negative. pdf-lib handles signs, but Y position needs care.
+                                // Canvas Draw: x, y, w, h. (y is top-left).
+                                // PDF Draw: x, y, w, h. (y is bottom-left).
+                                // Correct Y for PDF = PageHeight - (CanvasY + CanvasHeight) IF height is positive (downwards). 
+                                // Actually simplistic mapping:
+                                // Canvas P1(x,y). PDF P1(x, H-y). 
+                                // We draw rect from P1 with width/height.
+                                // If height is positive (down), bottom is y+h. PDF Y should be H - (y+h)?
+                                // Let's keep it simple: Calculate Bottom-Left corner in PDF space.
+
+                                // Normalized Canvas Coords (Top-Left of rect)
+                                let cX = ann.x;
+                                let cY = ann.y;
+                                let cW = ann.width;
+                                let cH = ann.height;
+
+                                // Handle negative visual width/height
+                                if (cW < 0) { cX += cW; cW = Math.abs(cW); }
+                                if (cH < 0) { cY += cH; cH = Math.abs(cH); }
+
+                                const pdfX = cX * scaleX;
+                                const pdfY = pdfPageHeight - ((cY + cH) * scaleY); // Bottom-Left in PDF
+                                const pdfW = cW * scaleX;
+                                const pdfH = cH * scaleY;
+
+                                page.drawRectangle({
+                                    x: pdfX, y: pdfY, width: pdfW, height: pdfH,
+                                    borderColor: rgb(0, 0, 1), borderWidth: 3 * scaleX,
+                                });
+
+                            } else if (ann.type === 'image') {
+                                // Image Embedding
+                                const imageBytes = await ann.file.arrayBuffer();
+                                let pdfImage;
+                                if (ann.file.type === 'image/jpeg' || ann.file.type === 'image/jpg') {
+                                    pdfImage = await pdfDoc.embedJpg(imageBytes);
+                                } else {
+                                    pdfImage = await pdfDoc.embedPng(imageBytes);
+                                }
+
+                                const pdfX = ann.x * scaleX;
+                                const pdfW = ann.width * scaleX;
+                                const pdfH = ann.height * scaleY;
+                                const pdfY = pdfPageHeight - (ann.y * scaleY) - pdfH; // Bottom-Left
+
+                                page.drawImage(pdfImage, {
+                                    x: pdfX, y: pdfY, width: pdfW, height: pdfH
+                                });
+
+                            } else if (ann.type === 'note') {
+                                // Sticky Note
+                                const noteW = 150 * scaleX;
+                                const noteH = 100 * scaleY;
+                                const pdfX = ann.x * scaleX;
+                                const pdfY = pdfPageHeight - (ann.y * scaleY) - noteH;
+
+                                // 1. Yellow Background
+                                page.drawRectangle({
+                                    x: pdfX, y: pdfY, width: noteW, height: noteH,
+                                    color: rgb(1, 0.92, 0.23) // Yellow #ffeb3b
+                                });
+                                // 2. Text
+                                page.drawText(ann.text, {
+                                    x: pdfX + (10 * scaleX),
+                                    y: pdfY + noteH - (20 * scaleY), // Approximate text positioning
+                                    size: 14 * scaleY,
+                                    color: rgb(0, 0, 0)
                                 });
                             }
-                        } catch (innerErr) {
-                            addLog(`Error processing annotation ${idx} on page ${pageNumStr}: ${innerErr.message}`);
-                        }
-                    });
-                }
-            });
 
-            // D. Xuất file PDF mới
+                        } catch (innerErr) {
+                            addLog(`Error processing annotation: ${innerErr.message}`);
+                        }
+                    }
+                }
+            }
+
             addLog("Saving modified PDF...");
             const pdfBytes = await pdfDoc.save();
             const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-            addLog("PDF saved to blob. Initiating download.");
 
-            // 5. Download
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
             link.download = `edited_${file.filename}`;
             link.click();
-            addLog("Download triggered.");
 
         } catch (err) {
             console.error("Save error:", err);
             addLog(`CRITICAL ERROR: ${err.message}`);
-            addLog(`Stack: ${err.stack}`);
-
-            // Auto-download log file on error
+            // ... download log ...
             const logBlob = new Blob([logs.join('\n')], { type: 'text/plain' });
             const logLink = document.createElement('a');
             logLink.href = URL.createObjectURL(logBlob);
             logLink.download = "save_error_log.txt";
             logLink.click();
-
-            alert("Failed to save PDF. Error log downloaded.");
+            alert("Failed to save. Check logs.");
         }
     };
 
     return (
         <div className="flex flex-col h-screen bg-gray-900 text-white">
+            <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleImageUpload} />
+
             {/* Toolbar */}
             <div className="flex items-center justify-between p-4 bg-gray-800 shadow-md z-20">
                 <div className="flex items-center space-x-4">
@@ -310,11 +456,15 @@ const PdfEditor = ({ file, onBack }) => {
                     <div className="flex space-x-2 bg-gray-700 p-1 rounded-lg">
                         <ToolButton active={tool === 'view'} onClick={() => setTool('view')} icon="👁 View" />
                         <ToolButton active={tool === 'pen'} onClick={() => setTool('pen')} icon="✎ Pen" />
-                        <ToolButton active={tool === 'highlight'} onClick={() => setTool('highlight')} icon="🖊 Highlight" />
+                        <ToolButton active={tool === 'highlight'} onClick={() => setTool('highlight')} icon="🖊 Marker" />
                         <ToolButton active={tool === 'text'} onClick={() => setTool('text')} icon="T Text" />
+                        <ToolButton active={tool === 'rect'} onClick={() => setTool('rect')} icon="⬜ Rect" />
+                        <ToolButton active={tool === 'image'} onClick={triggerImageUpload} icon="🖼 Image" />
+                        <ToolButton active={tool === 'note'} onClick={() => setTool('note')} icon="📝 Note" />
                     </div>
                 )}
 
+                {/* ... Navigation & Save Buttons ... */}
                 <div className="flex items-center space-x-4">
                     <button disabled={pageNumber <= 1} onClick={() => setPageNumber(p => p - 1)} className="px-3 py-1 bg-gray-700 rounded disabled:opacity-50">Prev</button>
                     <span>{pageNumber} / {numPages || '--'}</span>
@@ -354,20 +504,26 @@ const PdfEditor = ({ file, onBack }) => {
                             className={`absolute inset-0 z-10 ${tool === 'view' ? '' : 'cursor-crosshair'}`}
                         />
 
-                        {/* Text Input Overlay */}
+                        {/* Pending Image Preview (Follow Mouse or Fixed Message?) */}
+                        {tool === 'image' && pendingImage && (
+                            <div className="absolute z-20 bg-black/70 text-white p-2 text-sm rounded pointer-events-none" style={{ top: 10, left: 10 }}>
+                                Click on canvas to place image
+                            </div>
+                        )}
+
+                        {/* Text/Note Input Overlay */}
                         {textInput && (
                             <div
-                                className="absolute z-20 bg-white p-1 rounded shadow-lg border border-blue-500"
+                                className={`absolute z-20 p-1 rounded shadow-lg border border-blue-500 ${textInput.type === 'note' ? 'bg-yellow-300' : 'bg-white'}`}
                                 style={{ left: textInput.x, top: textInput.y }}
                             >
-                                <input
+                                <textarea
                                     autoFocus
-                                    className="text-black outline-none bg-transparent min-w-[100px]"
+                                    className={`outline-none bg-transparent min-w-[150px] min-h-[50px] ${textInput.type === 'note' ? 'text-black' : 'text-black'}`}
                                     value={textInput.value}
                                     onChange={(e) => setTextInput({ ...textInput, value: e.target.value })}
-                                    onKeyDown={(e) => e.key === 'Enter' && confirmText()}
                                     onBlur={confirmText}
-                                    placeholder="Type here..."
+                                    placeholder={textInput.type === 'note' ? "Sticky Note Content" : "Type text..."}
                                 />
                             </div>
                         )}
