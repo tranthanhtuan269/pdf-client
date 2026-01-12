@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDocument, rgb, LineCapStyle } from 'pdf-lib';
 
 // Set worker source
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -264,7 +264,7 @@ const PdfEditor = ({ file, onBack }) => {
                                             thickness: scaledWidth,
                                             color: color,
                                             opacity: opacityVal,
-                                            lineCap: 'round',
+                                            lineCap: LineCapStyle.Round,
                                         });
                                     }
                                 }
