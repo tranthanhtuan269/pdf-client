@@ -30,6 +30,9 @@ const PdfEditor = ({ file, onBack }) => {
     // State for page dimensions (from react-pdf)
     const [pageDims, setPageDims] = useState({}); // { [pageNum]: { width, height } }
 
+    // Password State
+    const [pdfPassword, setPdfPassword] = useState('');
+
     const canvasRef = useRef(null);
     const contextRef = useRef(null);
 
@@ -78,6 +81,14 @@ const PdfEditor = ({ file, onBack }) => {
         setTool('image');
     };
 
+    // Password Handler
+    const handleSetPassword = () => {
+        const newPass = prompt("Enter a password to protect this PDF (Leave empty to remove):", pdfPassword);
+        if (newPass !== null) {
+            setPdfPassword(newPass);
+        }
+    };
+
 
     // --- Canvas Rendering Logic ---
     useEffect(() => {
@@ -117,7 +128,7 @@ const PdfEditor = ({ file, onBack }) => {
                 ctx.fillText(ann.text, ann.x, ann.y);
             } else if (ann.type === 'rect') {
                 ctx.beginPath();
-                ctx.strokeStyle = ann.color;
+                ctx.strokeStyle = 'blue';
                 ctx.lineWidth = 3;
                 ctx.rect(ann.x, ann.y, ann.width, ann.height);
                 ctx.stroke();
@@ -292,6 +303,25 @@ const PdfEditor = ({ file, onBack }) => {
 
             addLog("Loading PDF into pdf-lib...");
             const pdfDoc = await PDFDocument.load(existingPdfBytes);
+
+            // --- Encryption Step ---
+            if (pdfPassword) {
+                addLog("Encrypting PDF with password...");
+                pdfDoc.encrypt({
+                    userPassword: pdfPassword,
+                    ownerPassword: pdfPassword,
+                    permissions: {
+                        printing: 'highResolution',
+                        modifying: false,
+                        copying: false,
+                        annotating: false,
+                        fillingForms: false,
+                        contentAccessibility: false,
+                        documentAssembly: false,
+                    },
+                });
+            }
+
             const pages = pdfDoc.getPages();
 
             addLog("Applying annotations...");
@@ -470,6 +500,13 @@ const PdfEditor = ({ file, onBack }) => {
                         <ToolButton active={tool === 'rect'} onClick={() => setTool('rect')} icon="⬜ Rect" />
                         <ToolButton active={tool === 'image'} onClick={triggerImageUpload} icon="🖼 Image" />
                         <ToolButton active={tool === 'note'} onClick={() => setTool('note')} icon="📝 Note" />
+
+                        <div className="w-[1px] h-8 bg-gray-500 mx-2"></div>
+                        <ToolButton
+                            active={!!pdfPassword}
+                            onClick={handleSetPassword}
+                            icon={pdfPassword ? "🔒 Locked" : "🔓 Unlock"}
+                        />
                     </div>
                 )}
 
