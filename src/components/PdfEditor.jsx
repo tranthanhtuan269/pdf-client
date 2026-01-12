@@ -184,8 +184,6 @@ const PdfEditor = ({ file, onBack }) => {
                             if (pathData.length > 1) {
                                 // Simplifying: drawing disconnected lines for simplicity or SVG path
                                 // pdf-lib drawLine is simple. simpler to use SVG path if complex.
-                                // For high performance, we construct a path string? 
-                                // Let's just draw line segments.
 
                                 // Optimization: Construct SVG path string
                                 let svgPath = `M ${pathData[0].x} ${pathData[0].y}`;
@@ -193,10 +191,15 @@ const PdfEditor = ({ file, onBack }) => {
                                     svgPath += ` L ${pathData[i].x} ${pathData[i].y}`;
                                 }
 
+                                // Detect opacity
+                                const isHighlight = ann.color.includes('255, 255, 0') || ann.color.includes('0, 0.5');
+                                const opacityVal = isHighlight ? 0.3 : 1; // 0.3 looks better for highlighter
+
                                 page.drawSvgPath(svgPath, {
                                     borderColor: color,
                                     borderWidth: ann.width,
-                                    borderOpacity: ann.color.includes('0.5') ? 0.5 : 1
+                                    opacity: opacityVal, // Use global opacity for the path
+                                    borderOpacity: opacityVal, // Redundant but safe
                                 });
                             }
                         } else if (ann.type === 'text') {
