@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 
-const UploadScreen = ({ onFilePayload }) => {
+const UploadScreen = ({ onFilePayload, onMergeClick, onCompressClick, onUnlockClick, onWatermarkClick, onOrganizeClick }) => {
     const [dragActive, setDragActive] = useState(false);
     const [error, setError] = useState(null);
     const inputRef = useRef(null);
@@ -116,6 +116,45 @@ const UploadScreen = ({ onFilePayload }) => {
                             <p className="text-2xl font-bold text-white mb-2">Drop it!</p>
                         </div>
                     )}
+                </div>
+
+                {/* Extra Actions */}
+                <div className="flex justify-center space-x-4">
+                    <button
+                        onClick={onMergeClick}
+                        className="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-blue-300 font-semibold rounded-lg border border-blue-500/30 transition-all flex items-center space-x-2"
+                    >
+                        <span className="text-xl">📑</span>
+                        <span>Merge Files</span>
+                    </button>
+                    <button
+                        onClick={onCompressClick}
+                        className="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-orange-300 font-semibold rounded-lg border border-orange-500/30 transition-all flex items-center space-x-2"
+                    >
+                        <span className="text-xl">🗜️</span>
+                        <span>Compress PDF</span>
+                    </button>
+                    <button
+                        onClick={onUnlockClick}
+                        className="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-purple-300 font-semibold rounded-lg border border-purple-500/30 transition-all flex items-center space-x-2"
+                    >
+                        <span className="text-xl">🔓</span>
+                        <span>Unlock Helper</span>
+                    </button>
+                    <button
+                        onClick={onWatermarkClick}
+                        className="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-cyan-300 font-semibold rounded-lg border border-cyan-500/30 transition-all flex items-center space-x-2"
+                    >
+                        <span className="text-xl">©️</span>
+                        <span>Watermark</span>
+                    </button>
+                    <button
+                        onClick={onOrganizeClick}
+                        className="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-emerald-300 font-semibold rounded-lg border border-emerald-500/30 transition-all flex items-center space-x-2"
+                    >
+                        <span className="text-xl">✂️</span>
+                        <span>Organize & Crop</span>
+                    </button>
                 </div>
 
                 {error && (

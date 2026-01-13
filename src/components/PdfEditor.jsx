@@ -303,48 +303,136 @@ const PdfEditor = ({ file, onBack }) => {
 
             addLog("Loading PDF into pdf-lib...");
             const pdfDoc = await PDFDocument.load(existingPdfBytes);
+            const pages = pdfDoc.getPages();
 
-            // DEBUG: Check available methods
-            const proto = Object.getPrototypeOf(pdfDoc);
-            addLog(`DEBUG: PDFDocument methods: ${Object.getOwnPropertyNames(proto).join(', ')}`);
-            addLog(`DEBUG: Has encrypt? ${typeof pdfDoc.encrypt}`);
+            addLog("Applying annotations...");
+            const pageNumStrs = Object.keys(annotations);
 
-            // --- Encryption Step ---
-            if (pdfPassword) {
-                if (typeof pdfDoc.encrypt === 'function') {
-                    addLog("Encrypting PDF with password...");
-                    pdfDoc.encrypt({
-                        userPassword: pdfPassword,
-                        ownerPassword: pdfPassword,
-                        permissions: {
-                            printing: 'highResolution',
-                            modifying: false,
-                            copying: false,
-                            annotating: false,
-                            fillingForms: false,
-                            contentAccessibility: false,
-                            documentAssembly: false,
-                        },
-                    });
-                } else {
-                    addLog("WARNING: pdfDoc.encrypt is not a function. Skipping encryption.");
-                    alert(`Encryption failed: 'encrypt' method missing. \nMethods found: ${Object.getOwnPropertyNames(proto).filter(m => m.startsWith('e')).join(', ')}`);
+            for (const pageNumStr of pageNumStrs) {
+                const pageNum = parseInt(pageNumStr);
+                const pageIndex = pageNum - 1;
+
+                if (pageIndex >= 0 && pageIndex < pages.length) {
+                    const page = pages[pageIndex];
+                    const { width: pdfPageWidth, height: pdfPageHeight } = page.getSize();
+                    const renderedDim = pageDims[pageNum] || { width: pdfPageWidth, height: pdfPageHeight };
+                    const scaleX = pdfPageWidth / renderedDim.width;
+                    const scaleY = pdfPageHeight / renderedDim.height;
+                    const pageAnns = annotations[pageNumStr];
+
+                    for (const ann of pageAnns) {
+                        try {
+                            if (ann.type === 'path') {
+                                const pathData = ann.points.map(p => ({ x: p.x * scaleX, y: pdfPageHeight - (p.y * scaleY) }));
+                                if (pathData.length > 1) {
+                                    const isHighlight = ann.color.includes('255, 255, 0') || ann.color.includes('0, 0.5');
+                                    const opacityVal = isHighlight ? 0.5 : 1;
+                                    const scaledWidth = ann.width * scaleX;
+                                    let color = rgb(1, 0, 0);
+                                    if (ann.color.includes('255, 255, 0')) color = rgb(1, 1, 0);
+
+                                    for (let i = 0; i < pathData.length - 1; i++) {
+                                        page.drawLine({
+                                            start: pathData[i], end: pathData[i + 1],
+                                            thickness: scaledWidth, color, opacity: opacityVal, lineCap: LineCapStyle.Round,
+                                        });
+                                    }
+                                }
+                            } else if (ann.type === 'text') {
+                                page.drawText(ann.text, {
+                                    x: ann.x * scaleX, y: pdfPageHeight - (ann.y * scaleY),
+                                    size: ann.size * scaleY, color: rgb(0, 0, 0),
+                                });
+                            } else if (ann.type === 'rect') {
+                                let cX = ann.x, cY = ann.y, cW = ann.width, cH = ann.height;
+                                if (cW < 0) { cX += cW; cW = Math.abs(cW); }
+                                if (cH < 0) { cY += cH; cH = Math.abs(cH); }
+                                const pdfX = cX * scaleX;
+                                const pdfY = pdfPageHeight - ((cY + cH) * scaleY);
+                                const pdfW = cW * scaleX;
+                                const pdfH = cH * scaleY;
+                                page.drawRectangle({
+                                    x: pdfX, y: pdfY, width: pdfW, height: pdfH,
+                                    borderColor: rgb(0, 0, 1), borderWidth: 3 * scaleX,
+                                });
+                            } else if (ann.type === 'image') {
+                                const imageBytes = await ann.file.arrayBuffer();
+                                let pdfImage;
+                                if (ann.file.type === 'image/jpeg' || ann.file.type === 'image/jpg') {
+                                    pdfImage = await pdfDoc.embedJpg(imageBytes);
+                                } else {
+                                    pdfImage = await pdfDoc.embedPng(imageBytes);
+                                }
+                                const pdfX = ann.x * scaleX;
+                                const pdfW = ann.width * scaleX;
+                                const pdfH = ann.height * scaleY;
+                                const pdfY = pdfPageHeight - (ann.y * scaleY) - pdfH;
+                                page.drawImage(pdfImage, { x: pdfX, y: pdfY, width: pdfW, height: pdfH });
+                            } else if (ann.type === 'note') {
+                                const noteW = 150 * scaleX;
+                                const noteH = 100 * scaleY;
+                                const pdfX = ann.x * scaleX;
+                                const pdfY = pdfPageHeight - (ann.y * scaleY) - noteH;
+                                page.drawRectangle({ x: pdfX, y: pdfY, width: noteW, height: noteH, color: rgb(1, 0.92, 0.23) });
+                                page.drawText(ann.text, { x: pdfX + (10 * scaleX), y: pdfY + noteH - (20 * scaleY), size: 14 * scaleY, color: rgb(0, 0, 0) });
+                            }
+                        } catch (innerErr) {
+                            addLog(`Error processing annotation: ${innerErr.message}`);
+                        }
+                    }
                 }
             }
 
-            const pages = pdfDoc.getPages();
-            // ... (rest of function) ...
+            addLog("Saving modified PDF...");
+            // 1. Generate the PDF Client-Side
+            const pdfBytes = await pdfDoc.save();
+            let finalBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+
+            // 2. Encryption Step (Server-Side)
+            if (pdfPassword) {
+                addLog("Sending to server for encryption...");
+                try {
+                    const formData = new FormData();
+                    formData.append('file', finalBlob, 'temp.pdf');
+                    formData.append('password', pdfPassword);
+
+                    const response = await fetch('http://localhost:5000/api/process-pdf', {
+                        method: 'POST',
+                        body: formData,
+                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`Server encryption failed: ${errorText}`);
+                    }
+
+                    finalBlob = await response.blob();
+                    addLog("Received encrypted PDF from server.");
+                } catch (e) {
+                    console.error("Encryption error:", e);
+                    alert(`Encryption failed: ${e.message}\nDownloading unencrypted file instead.`);
+                }
+            }
+
+            // 3. Download
+            const originalName = file.originalname || file.filename || 'document.pdf';
+            const namePart = originalName.substring(0, originalName.lastIndexOf('.')) || originalName;
+            const extension = originalName.substring(originalName.lastIndexOf('.'));
+            const downloadName = `edited_${namePart}${extension}`;
+
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(finalBlob);
+            link.download = downloadName;
+            link.click();
+
         } catch (err) {
             console.error("Save error:", err);
             addLog(`CRITICAL ERROR: ${err.message}`);
-            // ... download log ...
             const logBlob = new Blob([logs.join('\n')], { type: 'text/plain' });
             const logLink = document.createElement('a');
             logLink.href = URL.createObjectURL(logBlob);
             logLink.download = "save_error_log.txt";
             logLink.click();
-
-            // SHOW ERROR TO USER
             alert(`Failed to save: ${err.message}`);
         }
     };

@@ -13,7 +13,7 @@
     "@tailwindcss/postcss": "^4.1.18",
     "autoprefixer": "^10.4.23",
     "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^5.4.530",
+    "pdfjs-dist": "^5.4.296",
     "postcss": "^8.5.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

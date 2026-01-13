@@ -1,10 +1,16 @@
 import React, { useState } from 'react';
 import UploadScreen from './components/UploadScreen';
 import PdfEditor from './components/PdfEditor';
+import MergeScreen from './components/MergeScreen';
+import CompressScreen from './components/CompressScreen';
+import UnlockScreen from './components/UnlockScreen';
+import WatermarkScreen from './components/WatermarkScreen';
+import OrganizeScreen from './components/OrganizeScreen';
 
 function App() {
   const [currentFile, setCurrentFile] = useState(null); // { url, type, name }
   const [isUploading, setIsUploading] = useState(false);
+  const [mode, setMode] = useState('home'); // 'home', 'editor', 'merge', 'compress'
 
   const handleFilePayload = async (file) => {
     setIsUploading(true);
@@ -26,6 +32,7 @@ function App() {
       const data = await response.json();
       // data.file has { url, type, ... }
       setCurrentFile(data.file);
+      setMode('editor');
 
     } catch (error) {
       console.error("Upload error:", error);
@@ -37,6 +44,7 @@ function App() {
 
   const handleBack = () => {
     setCurrentFile(null);
+    setMode('home');
   };
 
   if (isUploading) {
@@ -47,11 +55,41 @@ function App() {
     );
   }
 
-  if (currentFile) {
+  if (mode === 'editor' && currentFile) {
     return <PdfEditor file={currentFile} onBack={handleBack} />;
   }
 
-  return <UploadScreen onFilePayload={handleFilePayload} />;
+  if (mode === 'merge') {
+    return <MergeScreen onBack={() => setMode('home')} />;
+  }
+
+  if (mode === 'compress') {
+    return <CompressScreen onBack={() => setMode('home')} />;
+  }
+
+  if (mode === 'unlock') {
+    return <UnlockScreen onBack={() => setMode('home')} />;
+  }
+
+  if (mode === 'watermark') {
+    return <WatermarkScreen onBack={() => setMode('home')} />;
+  }
+
+  if (mode === 'organize') {
+    return <OrganizeScreen onBack={() => setMode('home')} />;
+  }
+
+  // Pass setMode options to UploadScreen
+  return (
+    <UploadScreen
+      onFilePayload={handleFilePayload}
+      onMergeClick={() => setMode('merge')}
+      onCompressClick={() => setMode('compress')}
+      onUnlockClick={() => setMode('unlock')}
+      onWatermarkClick={() => setMode('watermark')}
+      onOrganizeClick={() => setMode('organize')}
+    />
+  );
 }
 
 export default App;
