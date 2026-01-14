@@ -12,6 +12,9 @@ function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [mode, setMode] = useState('home'); // 'home', 'editor', 'merge', 'compress'
 
+  // Dynamic API Base URL (auto-detects IP address)
+  const API_BASE = `http://${window.location.hostname}:5000`;
+
   const handleFilePayload = async (file) => {
     setIsUploading(true);
 
@@ -20,7 +23,7 @@ function App() {
     formData.append('file', file);
 
     try {
-      const response = await fetch('http://localhost:5000/api/upload', {
+      const response = await fetch(`${API_BASE}/api/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -56,27 +59,27 @@ function App() {
   }
 
   if (mode === 'editor' && currentFile) {
-    return <PdfEditor file={currentFile} onBack={handleBack} />;
+    return <PdfEditor file={currentFile} onBack={handleBack} apiBase={API_BASE} />;
   }
 
   if (mode === 'merge') {
-    return <MergeScreen onBack={() => setMode('home')} />;
+    return <MergeScreen onBack={() => setMode('home')} apiBase={API_BASE} />;
   }
 
   if (mode === 'compress') {
-    return <CompressScreen onBack={() => setMode('home')} />;
+    return <CompressScreen onBack={() => setMode('home')} apiBase={API_BASE} />;
   }
 
   if (mode === 'unlock') {
-    return <UnlockScreen onBack={() => setMode('home')} />;
+    return <UnlockScreen onBack={() => setMode('home')} apiBase={API_BASE} />;
   }
 
   if (mode === 'watermark') {
-    return <WatermarkScreen onBack={() => setMode('home')} />;
+    return <WatermarkScreen onBack={() => setMode('home')} apiBase={API_BASE} />;
   }
 
   if (mode === 'organize') {
-    return <OrganizeScreen onBack={() => setMode('home')} />;
+    return <OrganizeScreen onBack={() => setMode('home')} apiBase={API_BASE} />;
   }
 
   // Pass setMode options to UploadScreen

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 
-const UnlockScreen = ({ onBack }) => {
+const UnlockScreen = ({ onBack, apiBase }) => {
+
     const [file, setFile] = useState(null);
     const [password, setPassword] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
@@ -28,7 +29,7 @@ const UnlockScreen = ({ onBack }) => {
         formData.append('password', password);
 
         try {
-            const response = await fetch('http://localhost:5000/api/unlock-pdf', {
+            const response = await fetch(`${apiBase}/api/unlock-pdf`, {
                 method: 'POST',
                 body: formData,
             });
@@ -57,7 +58,7 @@ const UnlockScreen = ({ onBack }) => {
     };
 
     return (
-        <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center py-10">
+        <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center py-10" >
             <div className="w-full max-w-xl bg-gray-800 p-8 rounded-xl shadow-2xl">
                 <div className="flex justify-between items-center mb-8">
                     <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-500">
@@ -124,7 +125,7 @@ const UnlockScreen = ({ onBack }) => {
                     </button>
                 </div>
             </div>
-        </div>
+        </div >
     );
 };
 

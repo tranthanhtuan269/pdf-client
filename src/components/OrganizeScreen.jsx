@@ -70,23 +70,74 @@ const OrganizeScreen = ({ onBack }) => {
         setSelectedPages(newSet);
     };
 
-    // --- Actions ---
+    // --- Sorting ---
+    const [draggedIndex, setDraggedIndex] = useState(null);
 
+    const handleDragStart = (e, index) => {
+        setDraggedIndex(index);
+        e.dataTransfer.effectAllowed = "move";
+        // Ghost image transparency usually handled by browser, but we can style if needed
+    };
+
+    const handleDragOver = (e, index) => {
+        e.preventDefault(); // Necessary to allow dropping
+        e.dataTransfer.dropEffect = "move";
+    };
+
+    const handleDrop = async (e, dropIndex) => {
+        e.preventDefault();
+        if (draggedIndex === null || draggedIndex === dropIndex) return;
+
+        // Visual feedback immediate update (optional, but skipping for simplicity, doing direct PDF update)
+        // Reorder logic
+        await updatePdf(async (pdfDoc) => {
+            const pageCount = pdfDoc.getPageCount();
+            const indices = Array.from({ length: pageCount }, (_, i) => i);
+
+            // Move index in array
+            const [movedItem] = indices.splice(draggedIndex, 1);
+            indices.splice(dropIndex, 0, movedItem);
+
+            // Create new PDF with reordered pages
+            // We cannot just reorder in place easily, so easiest is verify efficient copy
+            // Actually pdf-lib is mutable. ensuring we don't loose annotations.
+            // Best way: Create new PDF, copy pages in new order.
+
+            const newPdf = await PDFDocument.create();
+            const copiedPages = await newPdf.copyPages(pdfDoc, indices);
+            copiedPages.forEach(page => newPdf.addPage(page));
+
+            // Replace current pdfBytes with new PDF
+            const newBytes = await newPdf.save();
+            return newBytes; // Special signal to updatePdf wrapper to use these bytes directly? 
+            // My updatePdf wrapper expects callback to modify 'pdfDoc' in place. 
+            // PROPOSE: Modify updatePdf to handle returning a NEW doc or bytes.
+        });
+    };
+
+    // Modified updatePdf to handle full replacement if needed
     const updatePdf = async (callback) => {
         if (!pdfBytes) return;
         setIsProcessing(true);
         try {
             const pdfDoc = await PDFDocument.load(pdfBytes);
-            await callback(pdfDoc);
-            const newBytes = await pdfDoc.save();
+            const result = await callback(pdfDoc);
+
+            let newBytes;
+            if (result instanceof Uint8Array) {
+                newBytes = result; // Callback returned new bytes (reorder case)
+            } else {
+                newBytes = await pdfDoc.save(); // Callback modified doc in place
+            }
+
             displayPdf(newBytes);
-            // Reset selection handles
             setSelectedPages(new Set());
         } catch (error) {
             console.error(error);
             alert("Error modifying PDF: " + error.message);
         } finally {
             setIsProcessing(false);
+            setDraggedIndex(null);
         }
     };
 
@@ -173,7 +224,7 @@ const OrganizeScreen = ({ onBack }) => {
                     <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-green-500">
                         Organize Pages
                     </h2>
-                    <p className="text-gray-400 text-sm">Rotate, Delete, and Crop</p>
+                    <p className="text-gray-400 text-sm">Drag to Reorder, Rotate, Delete, Snipping Tool</p>
                 </div>
                 <div className="flex gap-4">
                     <button onClick={handleDownload} disabled={!pdfBytes} className="px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-bold shadow-lg disabled:opacity-50">
@@ -214,7 +265,8 @@ const OrganizeScreen = ({ onBack }) => {
                             <hr className="border-gray-700 my-4" />
 
                             <p className="text-xs text-gray-400">
-                                To <b>Crop</b>, click the 'Scissors' icon on a specific page.
+                                <b>Drag & Drop</b> pages to reorder.<br />
+                                Click ✂️ to crop.
                             </p>
                         </>
                     )}
@@ -239,8 +291,15 @@ const OrganizeScreen = ({ onBack }) => {
                             {Array.from(new Array(pageCount), (el, index) => (
                                 <div
                                     key={`page_${index}`}
-                                    className={`relative group cursor-pointer transition-all ${selectedPages.has(index) ? 'ring-4 ring-emerald-500 scale-105' : 'hover:scale-105'}`}
+                                    className={`relative group cursor-pointer transition-all 
+                                        ${selectedPages.has(index) ? 'ring-4 ring-emerald-500 scale-105' : 'hover:scale-105'}
+                                        ${draggedIndex === index ? 'opacity-50' : ''}
+                                    `}
                                     onClick={() => toggleSelection(index)}
+                                    draggable={true}
+                                    onDragStart={(e) => handleDragStart(e, index)}
+                                    onDragOver={(e) => handleDragOver(e, index)}
+                                    onDrop={(e) => handleDrop(e, index)}
                                 >
                                     <Page
                                         pageNumber={index + 1}

@@ -5,7 +5,8 @@ import { PDFDocument, rgb, LineCapStyle } from 'pdf-lib';
 // Set worker source
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-const PdfEditor = ({ file, onBack }) => {
+const PdfEditor = ({ file, onBack, apiBase }) => {
+
     const [numPages, setNumPages] = useState(null);
     const [pageNumber, setPageNumber] = useState(1);
     const [tool, setTool] = useState('view'); // view, pen, highlight, text, rect, image, note
@@ -396,7 +397,7 @@ const PdfEditor = ({ file, onBack }) => {
                     formData.append('file', finalBlob, 'temp.pdf');
                     formData.append('password', pdfPassword);
 
-                    const response = await fetch('http://localhost:5000/api/process-pdf', {
+                    const response = await fetch(`${apiBase}/api/process-pdf`, {
                         method: 'POST',
                         body: formData,
                     });

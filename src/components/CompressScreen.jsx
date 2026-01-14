@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 
-const CompressScreen = ({ onBack }) => {
+const CompressScreen = ({ onBack, apiBase }) => {
+
     const [file, setFile] = useState(null);
     const [isProcessing, setIsProcessing] = useState(false);
 
@@ -23,7 +24,7 @@ const CompressScreen = ({ onBack }) => {
         formData.append('file', file);
 
         try {
-            const response = await fetch('http://localhost:5000/api/compress-pdf', {
+            const response = await fetch(`${apiBase}/api/compress-pdf`, {
                 method: 'POST',
                 body: formData,
             });
@@ -52,7 +53,7 @@ const CompressScreen = ({ onBack }) => {
     };
 
     return (
-        <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center py-10">
+        <div className="min-h-screen bg-gray-900 text-white flex flex-col items-center py-10" >
             <div className="w-full max-w-xl bg-gray-800 p-8 rounded-xl shadow-2xl">
                 <div className="flex justify-between items-center mb-8">
                     <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-orange-400 to-red-500">
@@ -107,7 +108,7 @@ const CompressScreen = ({ onBack }) => {
                     </button>
                 </div>
             </div>
-        </div>
+        </div >
     );
 };
 
